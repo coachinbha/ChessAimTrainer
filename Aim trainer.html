@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Chessboard with Continuous Play and Time Tracking</title>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            height: 100vh;
+            margin: 0;
+            padding: 62px;
+            font-family: Arial, sans-serif;
+        }
+        #game-container {
+            display: flex;
+            gap: 20px;
+        }
+        #chessboard-container {
+            position: relative;
+        }
+        #chessboard {
+            width: 1072px;
+            height: 1072px;
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            position: relative;
+        }
+        .square {
+            width: 134px;
+            height: 134px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 130px;
+            position: relative;
+            cursor: pointer;
+        }
+        .white {
+            background-color: #ebecd0;
+        }
+        .black {
+            background-color: #739552;
+        }
+        .selected {
+            background-color: #7cfc00;
+        }
+        .valid-move::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 45px;
+            height: 45px;
+            background-color: lightgray;
+            border-radius: 50%;
+        }
+        .target-square {
+            background-color: #ff6b6b;
+        }
+        #controls {
+            margin-top: 20px;
+        }
+        button {
+            margin-right: 10px;
+            margin-bottom: 10px;
+            padding: 5px 10px;
+            font-size: 16px;
+        }
+        #timer {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 20px;
+        }
+        #average-time {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 20px;
+            margin-left: 20px;
+        }
+        #side-panel {
+            display: flex;
+            flex-direction: column;
+        }
+        table {
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+           #table-container {
+        max-height: 940px; /* Match the chessboard height */
+        max-width: 500px; /* Set a maximum width to make it less wide */
+        overflow-y: auto;
+        margin-top: 20px;
+        border: 1px solid #ddd; /* Optional: to match table borders */
+    }
+
+        .notation-row, .notation-column {
+            position: absolute;
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+        }
+        .notation-row {
+            left: -30px;
+            transform: translateY(-50%);
+        }
+        .notation-column {
+            bottom: -30px;
+            transform: translateX(-50%);
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <div id="chessboard-container">
+            <div id="chessboard"></div>
+        </div>
+          <div id="side-panel">
+              <div style="display: flex; align-items: center;">
+                  <div id="timer">00:00.00</div>
+                  <div id="average-time">Average: 00:00.00</div>
+					<input type="checkbox" id="oneMoveAwayCheckbox"> One Move Away
+              </div>
+              <div id="controls">
+                  <button onclick="placePieceRandomly('♘')">Knight</button>
+                  <button onclick="placePieceRandomly('♗')">Bishop</button>
+                  <button onclick="placePieceRandomly('♖')">Rook</button>
+                  <button onclick="placePieceRandomly('♕')">Queen</button>
+                  <button onclick="placePieceRandomly('♔')">King</button>
+                  <button onclick="placePieceRandomly('♙')">Pawn</button>
+                  <button onclick="clearBoard()">Clear Board</button>
+              </div>
+              <div id="table-container">
+                  <table id="timeTable">
+                      <thead>
+                          <tr>
+                              <th>Move</th>
+                              <th>Thinking Time</th>
+                              <th>Move Time</th>
+                              <th>Total Time</th>
+                          </tr>
+                      </thead>
+                      <tbody></tbody>
+                  </table>
+              </div>
+          </div>
+	  <script>
+        const board = document.getElementById('chessboard');
+        const timerDisplay = document.getElementById('timer');
+        const averageTimeDisplay = document.getElementById('average-time');
+        const timeTable = document.getElementById('timeTable').getElementsByTagName('tbody')[0];
+        let selectedPiece = null;
+        let targetSquare = null;
+        let startTime = null;
+        let movementStartTime = null;
+        let timerInterval = null;
+        let moveCount = 0;
+        let currentPiece = null;
+        let totalMoveTime = 0;
+        let bishopSquareColor = null;
+
+        function createBoard() {
+            for (let row = 0; row < 8; row++) {
+                for (let col = 0; col < 8; col++) {
+                    const square = document.createElement('div');
+                    square.className = `square ${(row + col) % 2 === 0 ? 'white' : 'black'}`;
+                    square.dataset.row = row;
+                    square.dataset.col = col;
+                    square.addEventListener('click', handleClick);
+                    board.appendChild(square);
+                }
+            }
+            addNotation();
+        }
+
+        function addNotation() {
+            const notationContainer = document.getElementById('chessboard-container');
+
+            // Add row notation (1-8)
+            for (let i = 0; i < 8; i++) {
+                const rowNotation = document.createElement('div');
+                rowNotation.className = 'notation-row';
+                rowNotation.textContent = 8 - i;
+                rowNotation.style.top = `${i * 134 + 67}px`; // 67 is half the size of the square height
+                notationContainer.appendChild(rowNotation);
+            }
+
+            // Add column notation (A-H) under the board
+            const columns = 'ABCDEFGH';
+            for (let i = 0; i < 8; i++) {
+                const columnNotation = document.createElement('div');
+                columnNotation.className = 'notation-column';
+                columnNotation.textContent = columns[i];
+                columnNotation.style.left = `${i * 134 + 67}px`; // 67 is half the size of the square width
+                columnNotation.style.bottom = '-40px'; // Move below the board
+                notationContainer.appendChild(columnNotation);
+            }
+        }
+
+        function handleClick(event) {
+            const clickedSquare = event.target;
+            if (clickedSquare.textContent) {
+                if (selectedPiece === clickedSquare) {
+                    selectedPiece.classList.remove('selected');
+                    selectedPiece = null;
+                    clearHighlights();
+                } else {
+                    if (selectedPiece) {
+                        selectedPiece.classList.remove('selected');
+                        clearHighlights();
+                    }
+                    selectedPiece = clickedSquare;
+                    selectedPiece.classList.add('selected');
+                    highlightValidMoves(parseInt(clickedSquare.dataset.row), parseInt(clickedSquare.dataset.col));
+                    if (!timerInterval) {
+                        startTimer();
+                    }
+                    movementStartTime = Date.now();
+                }
+            } else if (selectedPiece) {
+                const toRow = parseInt(clickedSquare.dataset.row);
+                const toCol = parseInt(clickedSquare.dataset.col);
+                if (isValidMove(selectedPiece, toRow, toCol)) {
+                    const moveStartTime = Date.now();
+                    movePiece(selectedPiece, toRow, toCol);
+                    const moveEndTime = Date.now();
+                    const moveTime = moveEndTime - movementStartTime;
+                    totalMoveTime += moveTime;
+                    selectedPiece = null;
+                    clearHighlights();
+                    if (clickedSquare === targetSquare) {
+                        const totalTime = stopTimer();
+                        const thinkingTime = movementStartTime - startTime;
+                        storeTime(thinkingTime, moveTime, totalTime);
+                        if (toRow === 0 && currentPiece === '♙') {
+                            placePieceRandomly('♙');
+                        } else {
+                            highlightRandomSquare();
+                        }
+                        resetTimer();
+                    }
+                }
+            }
+        }
+
+        function isValidMove(from, toRow, toCol) {
+            const fromRow = parseInt(from.dataset.row);
+            const fromCol = parseInt(from.dataset.col);
+            const piece = from.textContent;
+
+            switch (piece) {
+                case '♙':
+                    return (toRow === fromRow - 1 && toCol === fromCol && !getPieceAt(toRow, toCol)) ||
+                           (fromRow === 6 && toRow === fromRow - 2 && toCol === fromCol && !getPieceAt(toRow, toCol) && !getPieceAt(toRow + 1, toCol)) ||
+                           (toRow === fromRow - 1 && Math.abs(toCol - fromCol) === 1 && getPieceAt(toRow, toCol));
+                case '♖':
+                    return (fromRow === toRow || fromCol === toCol) && !isPathBlocked(fromRow, fromCol, toRow, toCol);
+                case '♘':
+                    return (Math.abs(fromRow - toRow) === 2 && Math.abs(fromCol - toCol) === 1) ||
+                           (Math.abs(fromRow - toRow) === 1 && Math.abs(fromCol - toCol) === 2);
+                case '♗':
+                    return Math.abs(fromRow - toRow) === Math.abs(fromCol - toCol) && !isPathBlocked(fromRow, fromCol, toRow, toCol);
+                case '♕':
+                    return (fromRow === toRow || fromCol === toCol || Math.abs(fromRow - toRow) === Math.abs(fromCol - toCol)) &&
+                           !isPathBlocked(fromRow, fromCol, toRow, toCol);
+                case '♔':
+                    return Math.abs(fromRow - toRow) <= 1 && Math.abs(fromCol - toCol) <= 1;
+                default:
+                    return false;
+            }
+        }
+
+        function isPathBlocked(fromRow, fromCol, toRow, toCol) {
+            const rowStep = Math.sign(toRow - fromRow);
+            const colStep = Math.sign(toCol - fromCol);
+            let currentRow = fromRow + rowStep;
+            let currentCol = fromCol + colStep;
+
+            while (currentRow !== toRow || currentCol !== toCol) {
+                if (getPieceAt(currentRow, currentCol)) {
+                    return true;
+                }
+                currentRow += rowStep;
+                currentCol += colStep;
+            }
+
+            return false;
+        }
+
+        function getPieceAt(row, col) {
+            return document.querySelector(`.square[data-row="${row}"][data-col="${col}"]`).textContent;
+        }
+
+        function movePiece(from, toRow, toCol) {
+            const toSquare = document.querySelector(`.square[data-row="${toRow}"][data-col="${toCol}"]`);
+            toSquare.textContent = from.textContent;
+            from.textContent = '';
+            from.classList.remove('selected');
+        }
+
+        function highlightValidMoves(row, col) {
+            clearHighlights();
+            const piece = getPieceAt(row, col);
+
+            for (let i = 0; i < 8; i++) {
+                for (let j = 0; j < 8; j++) {
+                    if (isValidMove(document.querySelector(`.square[data-row="${row}"][data-col="${col}"]`), i, j)) {
+                        const square = document.querySelector(`.square[data-row="${i}"][data-col="${j}"]`);
+                        square.classList.add('valid-move');
+                    }
+                }
+            }
+        }
+
+        function clearHighlights() {
+            document.querySelectorAll('.valid-move').forEach(square => {
+                square.classList.remove('valid-move');
+            });
+        }
+
+        function placePieceRandomly(piece) {
+            const wasPawn = currentPiece === '♙';
+            clearBoard(wasPawn);
+            const row = piece === '♙' ? 6 : Math.floor(Math.random() * 8);
+            const col = Math.floor(Math.random() * 8);
+            const square = document.querySelector(`.square[data-row="${row}"][data-col="${col}"]`);
+            square.textContent = piece;
+            currentPiece = piece;
+            moveCount = 0;
+            if (piece === '♗') {
+                bishopSquareColor = (row + col) % 2 === 0 ? 'white' : 'black';
+            }
+            highlightRandomSquare();
+            resetTimer();
+        }
+
+        function clearBoard(preserveTimeTable = false) {
+            document.querySelectorAll('.square').forEach(square => {
+                square.textContent = '';
+                square.classList.remove('selected', 'valid-move', 'target-square');
+            });
+            selectedPiece = null;
+            targetSquare = null;
+            stopTimer();
+            if (!preserveTimeTable) {
+                timeTable.innerHTML = '';
+                totalMoveTime = 0;
+                updateAverageTime();
+            }
+            moveCount = 0;
+            bishopSquareColor = null;
+        }
+
+		function highlightRandomSquare() {
+    if (targetSquare) {
+        targetSquare.classList.remove('target-square');
+    }
+
+    let row, col, square;
+    const oneMoveAway = document.getElementById('oneMoveAwayCheckbox').checked;
+
+    // If the current piece is a pawn
+    if (currentPiece === '♙') {
+        const currentPawnSquare = [...board.querySelectorAll('.square')]
+            .find(square => square.textContent === '♙');
+        const currentPawnRow = parseInt(currentPawnSquare.dataset.row);
+        const currentPawnCol = parseInt(currentPawnSquare.dataset.col);
+
+        if (oneMoveAway) {
+            const validMoves = [];
+
+            // Check all squares in front of the pawn in the same column
+            for (let r = 0; r < currentPawnRow; r++) {
+                if (isValidMove(currentPawnSquare, r, currentPawnCol)) {
+                    validMoves.push([r, currentPawnCol]);
+                }
+            }
+
+            // Choose a random valid move if any are available
+            if (validMoves.length > 0) {
+                const randomMove = validMoves[Math.floor(Math.random() * validMoves.length)];
+                row = randomMove[0];
+                col = randomMove[1];
+                square = document.querySelector(`.square[data-row="${row}"][data-col="${col}"]`);
+            }
+        }
+
+        // If not using oneMoveAway or no valid moves found, place randomly in front
+        if (!square) {
+            do {
+                row = Math.floor(Math.random() * currentPawnRow);
+            } while (row >= currentPawnRow);
+
+            col = currentPawnCol;
+            square = document.querySelector(`.square[data-row="${row}"][data-col="${col}"]`);
+        }
+    } else {
+        // General case for non-pawn pieces
+        if (oneMoveAway) {
+            const currentSquare = [...board.querySelectorAll('.square')].find(sq => sq.textContent === currentPiece);
+            const fromRow = parseInt(currentSquare.dataset.row);
+            const fromCol = parseInt(currentSquare.dataset.col);
+            const validMoves = [];
+
+            // Check all squares on the board to find valid moves
+            for (let i = 0; i < 8; i++) {
+                for (let j = 0; j < 8; j++) {
+                    if (isValidMove(currentSquare, i, j) && (i !== fromRow || j !== fromCol)) {
+                        validMoves.push([i, j]);
+                    }
+                }
+            }
+
+            // Choose a random valid move if there are any valid moves available
+            if (validMoves.length > 0) {
+                const randomMove = validMoves[Math.floor(Math.random() * validMoves.length)];
+                row = randomMove[0];
+                col = randomMove[1];
+                square = document.querySelector(`.square[data-row="${row}"][data-col="${col}"]`);
+            }
+        }
+
+        // If not using oneMoveAway or no valid moves found, place randomly on the board
+        if (!square) {
+            do {
+                row = Math.floor(Math.random() * 8);
+                col = Math.floor(Math.random() * 8);
+                square = document.querySelector(`.square[data-row="${row}"][data-col="${col}"]`);
+            } while (getPieceAt(row, col) || (currentPiece === '♗' && (row + col) % 2 !== (bishopSquareColor === 'white' ? 0 : 1)));
+        }
+    }
+
+    targetSquare = square;
+    targetSquare.classList.add('target-square');
+    startTimer();
+}
+
+        function startTimer() {
+            if (timerInterval) {
+                clearInterval(timerInterval);
+            }
+            startTime = Date.now();
+            timerInterval = setInterval(updateTimer, 10);
+        }
+
+        function stopTimer() {
+            if (timerInterval) {
+                clearInterval(timerInterval);
+                timerInterval = null;
+            }
+            return Date.now() - startTime;
+        }
+
+        function resetTimer() {
+            stopTimer();
+            timerDisplay.textContent = '00:00.00';
+        }
+
+        function updateTimer() {
+            const elapsedTime = Date.now() - startTime;
+            const minutes = Math.floor(elapsedTime / 60000);
+            const seconds = Math.floor((elapsedTime % 60000) / 1000);
+            const milliseconds = Math.floor((elapsedTime % 1000) / 10);
+            timerDisplay.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(2, '0')}`;
+        }
+
+        function storeTime(thinkingTime, moveTime, totalTime) {
+            moveCount++;
+            const row = timeTable.insertRow();
+            const moveCell = row.insertCell(0);
+            const thinkingTimeCell = row.insertCell(1);
+            const moveTimeCell = row.insertCell(2);
+            const totalTimeCell = row.insertCell(3);
+            moveCell.textContent = `${currentPiece} - Move ${moveCount}`;
+            thinkingTimeCell.textContent = formatTime(thinkingTime);
+            moveTimeCell.textContent = formatTime(moveTime);
+            totalTimeCell.textContent = formatTime(totalTime);
+            updateAverageTime();
+        }
+
+        function formatTime(time) {
+            const minutes = Math.floor(time / 60000);
+            const seconds = Math.floor((time % 60000) / 1000);
+            const milliseconds = Math.floor((time % 1000) / 10);
+            return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(2, '0')}`;
+        }
+
+        function updateAverageTime() {
+            const averageMoveTime = totalMoveTime / moveCount || 0;
+            averageTimeDisplay.textContent = `AVERAGE: ${formatTime(averageMoveTime)}`;
+        }
+
+        createBoard();
+    </script>
+</body>
+</html>
